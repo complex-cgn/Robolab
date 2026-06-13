@@ -3,9 +3,10 @@
 from pathlib import Path
 
 import torch
+from safetensors.torch import load_file, load_model, save_model
 from torch import nn
 
-from utils.logger import logger
+from src.utils.logger import logger
 
 
 def get_device() -> torch.device:
@@ -27,7 +28,8 @@ def num_trainable_params(model: torch.nn.Module) -> int:
         int: Total number of trainable parameters.
     """
 
-    assert model is not None, "Model cannot be None"
+    if model is None:
+        raise ValueError("Model cannot be None")
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
@@ -41,11 +43,12 @@ def total_params(model: torch.nn.Module) -> int:
         int: Total number of parameters.
     """
 
-    assert model is not None, "Model cannot be None"
+    if model is None:
+        raise ValueError("Model cannot be None")
     return sum(p.numel() for p in model.parameters())
 
 
-def save_checkpoint(model: nn.Module, checkpoint_dir: str) -> None:
+def save_checkpoint(model: nn.Module, checkpoint_dir: str) -> str:
     """Save the model checkpoint to the specified directory.
 
     Args:
@@ -56,11 +59,14 @@ def save_checkpoint(model: nn.Module, checkpoint_dir: str) -> None:
         str: The full path to the saved checkpoint file.
     """
 
-    assert checkpoint_dir, "Invalid path"
-    assert model is not None, "Model cannot be None"
+    if not checkpoint_dir:
+        raise ValueError("Invalid path")
+    if model is None:
+        raise ValueError("Model cannot be None")
 
-    checkpoint_path = f"{checkpoint_dir}/model.ckpt"
-    torch.save(model.state_dict(), checkpoint_path)
+    Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
+    checkpoint_path = f"{checkpoint_dir}/model.safetensors"
+    save_model(model, checkpoint_path)
     logger.info(f"Checkpoint saved to {checkpoint_path}")
 
 
@@ -73,11 +79,15 @@ def load_checkpoint(model: nn.Module, checkpoint_address: str) -> None:
     """
 
     checkpoint_path = Path(checkpoint_address)
-    assert checkpoint_path.exists, "Checkpoint file does not exist"
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Checkpoint file does not exist: {checkpoint_path}")
 
     device = get_device()
-    model.load_state_dict(
-        torch.load(checkpoint_path, map_location=device, weights_only=True)
-    )
-    model.to(device)
+    try:
+        load_model(model, checkpoint_path, device=str(device))
+    except (TypeError, KeyError):
+        model.load_state_dict(
+            load_file(checkpoint_path, map_location=device, weights_only=True)
+        )
+        model.to(device)
     logger.info(f"Checkpoint loaded from {checkpoint_path}")

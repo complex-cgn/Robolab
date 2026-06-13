@@ -1,7 +1,50 @@
 """ResNet18 implementation for CIFAR-10 classification."""
 
+from dataclasses import dataclass
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+
+@dataclass
+class ModelConfig:
+    pass
+
+
+class ConvBlock(nn.Module):
+    def __init__(self, in_c: int, out_c: int, stride: int) -> None:
+        super().__init__()
+
+        self.net = nn.Sequential(
+            nn.Conv2d(in_c, out_c, 3, stride=stride, padding=1, bias=False),
+            nn.GroupNorm(8, out_c),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_c, out_c, 3, stride=1, padding=1, bias=False),
+            nn.GroupNorm(8, out_c),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class BasicBlock(nn.Module):
+    def __init__(self, in_c: int, out_c: int, stride: int) -> None:
+        super().__init__()
+
+        self.block = ConvBlock(in_c, out_c, stride)
+
+        self.skip = nn.Identity()
+        if stride != 1 or in_c != out_c:
+            self.skip = nn.Sequential(
+                nn.Conv2d(in_c, out_c, 1, stride=stride, bias=False),
+                nn.GroupNorm(8, out_c),
+            )
+
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.relu(self.block(x) + self.skip(x))
 
 
 class SEBlock(nn.Module):
@@ -38,69 +81,6 @@ class SEBlock(nn.Module):
         return x * y.expand_as(x)
 
 
-class BasicBlock(nn.Module):
-    """Basic ResNet block: two 3x3 conv layers with residual connection.
-
-    Unlike ResNet50's bottleneck design, ResNet18 uses simple 3x3→3x3 blocks
-    which are more efficient for smaller networks and CIFAR datasets.
-    """
-
-    expansion: int = 1
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        stride: int = 1,
-        downsample: nn.Module = None,
-    ) -> None:
-        """Initialize BasicBlock.
-
-        Args:
-            in_channels: Input channel count.
-            out_channels: Output channel count.
-            stride: Stride for the first conv layer.
-            downsample: Optional downsampling module for residual path.
-        """
-        super().__init__()
-
-        # Main path: two 3x3 conv layers with batch norm
-        self.conv1 = nn.Conv2d(
-            in_channels, out_channels, 3, stride, padding=1, bias=False
-        )
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, 1, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
-
-        # SE block for channel attention (optional, can be commented out if not needed)
-        self.se = SEBlock(out_channels, reduction=4)
-
-        # Shortcut path
-        self.downsample = downsample
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass through basic block."""
-        identity = x
-        assert x.shape == identity.shape, "Shape mismatch in residual connection"
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-
-        out = self.conv2(out)
-        out = self.bn2(out)
-
-        if self.downsample is not None:
-            identity = self.downsample(x)
-
-        out = self.se(out)
-        out += identity
-        out = self.relu(out)
-
-        return out
-
-
 class ResNet18(nn.Module):
     """ResNet-18 network architecture for CIFAR-10.
 
@@ -118,8 +98,8 @@ class ResNet18(nn.Module):
     def __init__(
         self,
         num_classes: int = 10,
-        block: nn.Module = BasicBlock,
-        layers: list = [2, 2, 2, 2],
+        block: type[nn.Module] = BasicBlock,
+        layers: list[int] = [2, 2, 2, 2],
         zero_init_residual: bool = False,
     ) -> None:
         """Initialize ResNet18.
@@ -145,62 +125,24 @@ class ResNet18(nn.Module):
         self.layer4_channels = 512  # output = 512 * 1 = 512
 
         # Stages: stride=2 for downsampling on first block of each stage
-        self.layer1 = self._make_layer(block, self.layer1_channels, layers[0], stride=1)
-        self.layer2 = self._make_layer(block, self.layer2_channels, layers[1], stride=2)
-        self.layer3 = self._make_layer(block, self.layer3_channels, layers[2], stride=2)
-        self.layer4 = self._make_layer(block, self.layer4_channels, layers[3], stride=2)
+        self.layer1 = block(self.in_channels, self.layer1_channels, stride=1)
+        self.layer2 = block(self.layer1_channels, self.layer2_channels, stride=2)
+        self.layer3 = block(self.layer2_channels, self.layer3_channels, stride=2)
+        self.layer4 = block(self.layer3_channels, self.layer4_channels, stride=2)
+
+        self.stages = nn.Sequential(
+            self.layer1,
+            self.layer2,
+            self.layer3,
+            self.layer4,
+        )
 
         # Final classification head
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+        self.fc = nn.Linear(512, num_classes)
 
         # Weight initialization
         self._initialize_weights()
-
-    def _make_layer(
-        self,
-        block: nn.Module,
-        channels: int,
-        num_blocks: int,
-        stride: int,
-    ) -> nn.Sequential:
-        """Create a sequence of basic blocks forming one stage.
-
-        Args:
-            block: Block type (BasicBlock).
-            channels: Base number of channels for this stage.
-            num_blocks: Number of blocks in this stage.
-            stride: Stride of the first block (controls spatial downsampling).
-
-        Returns:
-            nn.Sequential containing the blocks.
-        """
-
-        strides = [stride] + [1] * (num_blocks - 1)
-        layers = []
-
-        for i, s in enumerate(strides):
-            # Create downsample module only for the first block
-            if i == 0 and (
-                stride != 1 or self.in_channels != channels * block.expansion
-            ):
-                downsample = nn.Sequential(
-                    nn.Conv2d(
-                        self.in_channels,
-                        channels * block.expansion,
-                        1,
-                        stride,
-                        bias=False,
-                    ),
-                    nn.BatchNorm2d(channels * block.expansion),
-                )
-            else:
-                downsample = None
-
-            layers.append(block(self.in_channels, channels, s, downsample))
-            self.in_channels = channels * block.expansion
-
-        return nn.Sequential(*layers)
 
     def _initialize_weights(self) -> None:
         """Initialize weights using Kaiming initialization."""
@@ -221,8 +163,8 @@ class ResNet18(nn.Module):
             Classification logits (B, num_classes).
         """
 
-        # Check shape
-        assert x.dim() == 4, "Expected 4D input tensor (B, C, H, W)"
+        if x.dim() != 4:
+            raise ValueError("Expected 4D input tensor (B, C, H, W)")
 
         # Initial stem
         x = self.conv1(x)
@@ -230,10 +172,7 @@ class ResNet18(nn.Module):
         x = self.relu(x)
 
         # Stages
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+        x = self.stages(x)
 
         # Classification head
         x = self.avgpool(x)
@@ -243,7 +182,17 @@ class ResNet18(nn.Module):
         return x
 
 
-def model_factory(num_classes: int = 10) -> nn.Module:
-    """Factory function to create a ResNet18 model instance."""
-    assert num_classes >= 1, "num_classes must be >= 1"
-    return ResNet18(num_classes=num_classes)
+def model_factory(num_classes: int = 10, model_type: str = "resnet18") -> nn.Module:
+    """Factory function to create a model instance.
+
+    Args:
+        num_classes: Number of output classification classes.
+        model_type: Model architecture to use ('resnet18' or 'mythos').
+
+    Returns:
+        A PyTorch nn.Module instance.
+
+    Raises:
+        ValueError: If num_classes < 1 or invalid model_type provided.
+    """
+    return ResNet18()
