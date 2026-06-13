@@ -1,0 +1,24 @@
+{
+    "typeCheckingMode": "strict",
+    "reportMissingTypeStubs": "none",
+    "reportUnknownVariableType": "none",
+    "reportUnknownParameterType": "none",
+    "reportUnknownArgumentType": "none",
+    "reportGeneralTypeIssues": "none",
+    "reportUnknownMemberType": "none",
+    "reportPrivateImportUsage": "none",
+    "reportUnusedImport": "none",
+    "reportCallIssue": "none",
+    "include": [
+        "src"
+    ],
+    "exclude": [
+        "**/node_modules",
+        "**/__pycache__",
+        "**/.*",
+        ".venv",
+        ".venv/**"
+    ],
+    "venv": ".venv",
+    "venvPath": "."
+}

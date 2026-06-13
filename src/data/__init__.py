@@ -1,5 +1,5 @@
 """Data loading package."""
 
-from data.dataset import test_loader, train_loader, val_loader
+from src.data.dataset import DatasetWrapper, test_loader, train_loader, val_loader
 
-__all__ = ["train_loader", "test_loader", "val_loader"]
+__all__ = ["DatasetWrapper", "train_loader", "test_loader", "val_loader"]

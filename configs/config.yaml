@@ -12,9 +12,10 @@ trainparams:
   weight_decay: 5e-3
   criterion: CrossEntropyLoss
   optimizer: AdamW
-  dtype: float16
+  dtype: float32
   warmup_epochs: 5
   max_grad_norm: 1.0
+  accumulation_steps: 1
 
 testparams:
   dtype: float32

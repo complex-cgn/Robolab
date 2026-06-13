@@ -18,18 +18,19 @@ Configuration:
     via the centralized cfg object (cfg.trainparams, cfg.hyperparams).
 """
 
+from typing import cast
+
 import torch
 import torch.amp as amp
 import torch.nn as nn
 from torch.optim.lr_scheduler import OneCycleLR
 from torch.utils.tensorboard import SummaryWriter
 
-from configs import cfg
-from data import train_loader, val_loader
-from eval import evaluate
-from models import model_factory
-from src.utils import logger
-from utils import get_device, save_checkpoint, total_params
+from src.config import cfg
+from src.data import DatasetWrapper, train_loader, val_loader
+from src.eval import evaluate
+from src.models import model_factory
+from src.utils import get_device, logger, save_checkpoint, total_params
 
 
 class EarlyStopping:
@@ -97,7 +98,8 @@ class EarlyStopping:
             - Sets self.early_stop = True when patience is exhausted.
         """
 
-        assert 0.0 <= score <= 1.0, "Score must be between 0 and 1"
+        if not (0.0 <= score <= 1.0):
+            raise ValueError("Score must be between 0 and 1")
 
         if self.best_score is None:
             self.best_score = score
@@ -122,7 +124,11 @@ class EarlyStopping:
                 logger.info("Early stopping triggered.")
 
 
-def train(checkpoint_dir: str = "checkpoints", data_root: str = "./data") -> None:
+def train(
+    checkpoint_dir: str = "checkpoints",
+    data_root: str = "./data",
+    accumulation_steps: int = 4,
+) -> None:
     """Train ConvNet on CIFAR-10 with the configured hyperparameters.
 
     This function orchestrates the full training lifecycle including:
@@ -171,12 +177,16 @@ def train(checkpoint_dir: str = "checkpoints", data_root: str = "./data") -> Non
             torch.cuda.manual_seed_all(cfg.hyperparams.random_seed)
 
     # Model
+    torch.set_float32_matmul_precision("high")
     model = model_factory(num_classes=cfg.hyperparams.num_classes).to(device)
     logger.info(f"total_params: {total_params(model):,}")
 
     # Loss and optimizer
-    assert hasattr(nn, cfg.trainparams.criterion), "Criterion not found"
-    assert hasattr(torch.optim, cfg.trainparams.optimizer), "Optimizer not found"
+    if not hasattr(nn, cfg.trainparams.criterion):
+        raise ValueError(f"Criterion not found: {cfg.trainparams.criterion}")
+    if not hasattr(torch.optim, cfg.trainparams.optimizer):
+        raise ValueError(f"Optimizer not found: {cfg.trainparams.optimizer}")
+
     criterion = getattr(nn, cfg.trainparams.criterion)()
     optimizer = getattr(torch.optim, cfg.trainparams.optimizer)(
         model.parameters(),
@@ -193,9 +203,9 @@ def train(checkpoint_dir: str = "checkpoints", data_root: str = "./data") -> Non
 
     # Mixed precision training setup
     if device.type == "cuda":
-        scaler = amp.GradScaler(device)
+        scaler = amp.GradScaler("cuda")
     else:
-        scaler = None  # No need for scaler on CPU
+        scaler = None
 
     # TensorBoard writer
     writer = SummaryWriter(log_dir="runs/convnet_cifar10")
@@ -204,27 +214,39 @@ def train(checkpoint_dir: str = "checkpoints", data_root: str = "./data") -> Non
     for epoch in range(cfg.trainparams.num_epochs):
         # Training loop
         model.train()
+
+        optimizer.zero_grad()
+
         for i, (images, labels) in enumerate(train_loader):
             images = images.to(device)
             labels = labels.to(device)
 
-            optimizer.zero_grad()
-
             with amp.autocast(device.type, dtype=getattr(torch, cfg.trainparams.dtype)):
                 outputs = model(images)
                 loss = criterion(outputs, labels)
+                loss = loss / accumulation_steps
 
-            scaler.scale(loss).backward()
+            if scaler is not None:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
 
             # Gradient clipping — unscale gradients before clipping
-            max_grad_norm = 1.0
-            scaler.unscale_(optimizer)
-            nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+            if (i + 1) % accumulation_steps == 0 or (i + 1) == total_step:
+                max_grad_norm = 1.0
+                if scaler is not None:
+                    scaler.unscale_(optimizer)
+                nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
 
-            scaler.step(optimizer)
-            scaler.update()
+                if scaler is not None:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
 
-            scheduler.step()
+                optimizer.zero_grad()
+
+                scheduler.step()
 
             if (i + 1) % 100 == 0:
                 writer.add_scalar("Training Loss", loss.item(), epoch * total_step + i)
@@ -235,13 +257,16 @@ def train(checkpoint_dir: str = "checkpoints", data_root: str = "./data") -> Non
 
         # Validation
         model.eval()
-        metrics = evaluate(model, val_loader, dtype=cfg.trainparams.dtype)
+        metrics = evaluate(model, device, val_loader, dtype=cfg.trainparams.dtype)
 
         val_accuracy = metrics["accuracy"]
         writer.add_scalar("Validation Accuracy", val_accuracy, epoch)
+        # val_loader.dataset is typed as Dataset[DatasetWrapper] which lacks __len__
+        # in Pylance's type stubs, but the actual DatasetWrapper subclass has it.
+        val_total = len(cast(DatasetWrapper, val_loader.dataset))
         logger.info(
-            f"Validation Accuracy of the model on the "
-            f"{len(val_loader.dataset)} validation images: {val_accuracy:.2f} %"
+            f"Validation Accuracy of the models on the "
+            f"{val_total} validation images: {val_accuracy:.2f} %"
         )
 
         # Check for early stopping

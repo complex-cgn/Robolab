@@ -4,20 +4,22 @@ This module loads a trained model checkpoint and evaluates it on the
 full CIFAR-10 test set, logging overall and per-class metrics.
 """
 
-from configs import cfg
-from data import test_loader
-from eval import evaluate
-from models import model_factory
+from src.config import cfg
+from src.data import test_loader
+from src.eval import evaluate
+from src.models import model_factory
 from src.utils import (
+    get_device,
+    load_checkpoint,
     logger,
 )
-from utils import get_device, load_checkpoint
 
+from typing import Any
 
 def test(
     checkpoint_path: str = "checkpoints/model.ckpt",
     dtype: str = "float32",
-) -> dict:
+) -> dict[str, Any]:
     """Evaluate the trained model on the full CIFAR-10 test set.
 
     Loads a model checkpoint from disk, runs inference over the test
@@ -41,17 +43,17 @@ def test(
     model = model_factory(num_classes=cfg.hyperparams.num_classes).to(device)
     load_checkpoint(
         model=model,
-        checkpoint_path=checkpoint_path,
+        checkpoint_address=checkpoint_path,
     )
 
     # Run comprehensive evaluation via the eval module
-    metrics = evaluate(model, test_loader, dtype)
+    metrics = evaluate(model, device, test_loader, dtype=dtype)
 
     # Aggregate evaluation results into a single metrics dictionary
-    metrics = {
+    metrics: dict[str, Any] = {
         "overall_accuracy": metrics["accuracy"],
-        "total_samples": len(test_loader.dataset),
-        "correct_predictions": int(metrics["accuracy"] * len(test_loader.dataset)),
+        "total_samples": len(test_loader.dataset),  # type: ignore[union-attr]
+        "correct_predictions": int(metrics["accuracy"] * len(test_loader.dataset)),  # type: ignore[union-attr]
         "f1_score": metrics["f1_score"],
         "confusion_matrix": metrics["confusion_matrix"],
         "classification_report": metrics["classification_report"],

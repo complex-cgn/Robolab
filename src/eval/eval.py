@@ -5,6 +5,8 @@ on CIFAR-10 datasets, computing accuracy, F1 score, confusion
 matrix, and classification reports using scikit-learn.
 """
 
+from typing import Any, cast
+
 import numpy as np
 import torch
 from sklearn.metrics import (
@@ -15,15 +17,16 @@ from sklearn.metrics import (
     f1_score,
 )
 from torch import nn
+from torch.amp.autocast_mode import autocast
 
 
 def evaluate(
-    model: nn.Module,
+    model: nn.Module | None,
     device: torch.device,
-    data_loader: torch.utils.data.DataLoader,
+    data_loader: torch.utils.data.DataLoader[Any] | None,
     dtype: str | torch.dtype,
     target_class: int = 1,
-) -> dict:
+) -> dict[str, Any]:
     """Evaluate the trained model and return detailed metrics.
 
     Runs the model in inference mode over the provided data loader,
@@ -63,14 +66,18 @@ def evaluate(
     all_labels_list: list[np.ndarray] = []
     all_probs_list: list[np.ndarray] = []
 
-    autocast_ctx = torch.amp.autocast(device.type, resolved_dtype)
+    # Determine if autocast should be enabled (only for CUDA devices)
+    use_autocast = device.type == "cuda"
 
     with torch.no_grad():
         for images, labels in data_loader:
             images = images.to(device)
             labels = labels.to(device)
 
-            with autocast_ctx:
+            if use_autocast:
+                with autocast(device_type=device.type, dtype=resolved_dtype):
+                    outputs = model(images)
+            else:
                 outputs = model(images)
             _, predicted = torch.max(outputs.data, 1)
             probs = torch.softmax(outputs.data, dim=1)
@@ -84,14 +91,14 @@ def evaluate(
     all_labels = np.concatenate(all_labels_list)
     all_probs = np.concatenate(all_probs_list)
 
-    # Test
-    assert len(all_labels) == len(all_preds), "Labels and predictions lenght mismatch"
+    if len(all_labels) != len(all_preds):
+        raise ValueError("Labels and predictions length mismatch")
 
     # Compute evaluation metrics using scikit-learn
     acc = accuracy_score(all_labels, all_preds)
     f1 = f1_score(all_labels, all_preds, average="macro", zero_division=0)
     cm = confusion_matrix(all_labels, all_preds)
-    cr = classification_report(all_labels, all_preds, zero_division=0)
+    cr = cast(str, classification_report(all_labels, all_preds, zero_division=0))
 
     # Compute Brier score for the specified target class
     true_binary = (all_labels == target_class).astype(int)

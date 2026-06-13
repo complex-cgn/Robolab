@@ -3,10 +3,18 @@
 import difflib
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import torch
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+)
+from pydantic_core import ErrorDetails
 
 from src.utils import logger
 
@@ -45,6 +53,7 @@ class Hyperparameters(BaseModel):
         random_seed: Random seed for reproducibility, or None to disable.
         num_classes: Number of output classification classes.
         early_stopping_patience: Epochs to wait for validation improvement.
+        model_type: Type of model to use (resnet18 or mythos).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -71,7 +80,7 @@ class TrainingParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    batch_size: int = 100
+    batch_size: int
     weight_decay: float = Field(gt=0.0)
     warmup_epochs: int = Field(ge=0)
     max_grad_norm: float = Field(gt=0.0)
@@ -80,6 +89,7 @@ class TrainingParams(BaseModel):
     criterion: str
     optimizer: str
     dtype: str
+    accumulation_steps: int = Field(ge=1)
 
     @field_validator("criterion")
     @classmethod
@@ -148,10 +158,10 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    hyperparams: Hyperparameters = Field(default_factory=Hyperparameters)
-    trainparams: TrainingParams = Field(default_factory=TrainingParams)
-    testparams: TestingParams = Field(default_factory=TestingParams)
-    dataset: DatasetConfig = Field(default_factory=DatasetConfig)
+    hyperparams: Hyperparameters = Field(default_factory=lambda: Hyperparameters())
+    trainparams: TrainingParams = Field(default_factory=lambda: TrainingParams())
+    testparams: TestingParams = Field(default_factory=lambda: TestingParams())
+    dataset: DatasetConfig = Field(default_factory=lambda: DatasetConfig())
 
     @classmethod
     def load_from_yaml(cls, path: str | None = None) -> "Config":
@@ -182,7 +192,7 @@ class Config(BaseModel):
             raise ValueError(f"Configuration validation error: {e}") from e
 
     @classmethod
-    def _log_validation_error(cls, error: dict) -> None:
+    def _log_validation_error(cls, error: ErrorDetails) -> None:
         loc_list = error.get("loc", [])
         location = " -> ".join(str(loc) for loc in loc_list)
         wrong_field = loc_list[-1] if loc_list else "unknown"
@@ -208,7 +218,7 @@ class Config(BaseModel):
             handler()
 
     @classmethod
-    def _handle_extra_field(cls, wrong_field: str, loc_list: list) -> None:
+    def _handle_extra_field(cls, wrong_field: str, loc_list: list[Any]) -> None:
         logger.error(f"Unexpected field '{wrong_field}' found. Please remove it.")
 
         parent_model = cls._resolve_model(loc_list[:-1])
@@ -229,7 +239,7 @@ class Config(BaseModel):
             )
 
     @classmethod
-    def _resolve_model(cls, path: list) -> type | None:
+    def _resolve_model(cls, path: list[Any]) -> type | None:
         """Traverse nested Pydantic models by following field annotations."""
 
         current = cls
