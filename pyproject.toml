@@ -1,6 +1,6 @@
 [project]
 name = "robolab"
-version = "1.0.dev1"
+version = "1.0.dev2"
 description = "Image classification with ConvNet model"
 readme = "README.md"
 requires-python = ">=3.11"
