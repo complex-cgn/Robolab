@@ -59,7 +59,7 @@ def evaluate(
 
     # Disable gradient computation and set model to inference mode
     model.eval()
-    model = model.to(device, dtype=resolved_dtype)
+    model = model.to(device)
 
     # Accumulators for batched predictions and ground-truth labels
     all_preds_list: list[np.ndarray] = []
@@ -67,7 +67,7 @@ def evaluate(
     all_probs_list: list[np.ndarray] = []
 
     # Determine if autocast should be enabled (only for CUDA devices)
-    use_autocast = device.type == "cuda"
+    use_autocast = device.type == "cuda" and resolved_dtype is not None
 
     with torch.no_grad():
         for images, labels in data_loader:
@@ -75,16 +75,17 @@ def evaluate(
             labels = labels.to(device)
 
             if use_autocast:
-                with autocast(device_type=device.type, dtype=resolved_dtype):
+                with autocast(device_type="cuda", dtype=resolved_dtype):
                     outputs = model(images)
             else:
                 outputs = model(images)
+
             _, predicted = torch.max(outputs.data, 1)
             probs = torch.softmax(outputs.data, dim=1)
 
             all_preds_list.append(predicted.cpu().numpy())
             all_labels_list.append(labels.cpu().numpy())
-            all_probs_list.append(probs.cpu().numpy())
+            all_probs_list.append(probs.cpu().float().numpy())
 
     # Concatenate batch-wise predictions and labels into single arrays
     all_preds = np.concatenate(all_preds_list)
