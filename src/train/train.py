@@ -6,16 +6,13 @@ import torch.nn as nn
 
 from src.config import cfg
 from src.data import DatasetWrapper, train_loader, val_loader
-from src.models import model_factory
+from src.models import ResNet18
 from src.train.callback import Callback
 from src.train.callbacks import Terminal
-from src.utils import get_device
 
 
 @dataclass
 class Trainer:
-    model: nn.Module
-    device: torch.device
     optimizer: torch.optim.Optimizer
     criterion: nn.Module
     train_loader: torch.utils.data.DataLoader[DatasetWrapper]
@@ -23,7 +20,9 @@ class Trainer:
     num_epochs: int
     callbacks: Sequence[Callback]
 
-    epoch: int = field(init=False, default=0)
+    model: nn.Module = field(init=False)
+    device: torch.device = field(init=False)
+    epoch: int = field(init=False)
     total_steps: int = field(init=False)
 
     def __post_init__(self):
@@ -31,13 +30,15 @@ class Trainer:
             cb.attach(self)
 
         self.total_steps = len(self.train_loader)
+        self.device = next(model.parameters()).device
 
-    def fit(self):
+    def fit(self, model: nn.Module):
+        self.model = model
         for callback in self.callbacks:
             callback.on_train_start(self)
 
         for self.epoch in range(self.num_epochs):
-            self.model.train()
+            model.train()
             self._train_epoch()
 
         for callback in self.callbacks:
@@ -72,18 +73,18 @@ class Trainer:
 
 
 if __name__ == "__main__":
-    model = model_factory(cfg.hyperparams.num_classes).to(get_device())
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = ResNet18(num_classes=10).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    criterion = getattr(torch.nn, "CrossEntropyLoss")()
+
     trainer = Trainer(
-        model=model,
-        device=get_device(),
-        optimizer=torch.optim.AdamW(
-            model.parameters(),
-            lr=cfg.trainparams.learning_rate,
-        ),
-        criterion=getattr(nn, cfg.trainparams.criterion)(),
+        optimizer=optimizer,
+        criterion=criterion,
         train_loader=train_loader,
         val_loader=val_loader,
         num_epochs=50,
         callbacks=[Terminal()],
     )
-    trainer.fit()
+
+    trainer.fit(model)

@@ -1,12 +1,12 @@
 """Tests for src/train/train.py — EarlyStopping class and train function."""
 
+from pathlib import Path
+
 import pytest
 import torch
 import torch.nn as nn
-from pathlib import Path
 
 from src.train.train import EarlyStopping
-
 
 # ─── EarlyStopping ─────────────────────────────────────────────────────
 

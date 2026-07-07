@@ -1,19 +1,19 @@
 """Tests for src/config.py — configuration loading, validation, and Pydantic models."""
 
+from pathlib import Path
+
 import pytest
 import yaml
-from pathlib import Path
 from pydantic import ValidationError
 
 from src.config import (
     Config,
-    Hyperparameters,
-    TrainingParams,
-    TestingParams,
     DatasetConfig,
+    Hyperparameters,
     LossCriterion,
+    TestingParams,
+    TrainingParams,
 )
-
 
 # ─── LossCriterion Enum ────────────────────────────────────────────────
 

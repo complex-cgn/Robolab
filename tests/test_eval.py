@@ -2,10 +2,10 @@
 
 from typing import Any
 
+import numpy as np
 import pytest
 import torch
 import torch.nn as nn
-import numpy as np
 from sklearn.metrics import accuracy_score, f1_score
 
 from src.eval.eval import evaluate

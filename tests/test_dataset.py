@@ -4,8 +4,7 @@ import pytest
 import torch
 import torchvision
 
-from src.data.dataset import DatasetWrapper, DataLoader
-
+from src.data.dataset import DataLoader, DatasetWrapper
 
 # ─── DatasetWrapper ────────────────────────────────────────────────────
 
