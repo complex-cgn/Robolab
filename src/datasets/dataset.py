@@ -6,8 +6,6 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import random_split
 
-from src.config import cfg
-
 _CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
 _CIFAR10_STD = (0.2470, 0.2435, 0.2616)
 

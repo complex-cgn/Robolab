@@ -1,5 +1,5 @@
 """Training package."""
 
-from src.train.train import Trainer
+from training.trainer import Trainer
 
 __all__ = ["Trainer"]

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.train.train import Trainer
+    from training.trainer import Trainer
 
 
 @dataclass

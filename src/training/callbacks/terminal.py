@@ -12,10 +12,10 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from src.train.callback import Callback
+from training.callbacks.base import Callback
 
 if TYPE_CHECKING:
-    from src.train.train import Trainer
+    from training.trainer import Trainer
 
 
 @dataclass

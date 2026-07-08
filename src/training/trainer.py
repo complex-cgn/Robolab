@@ -4,11 +4,8 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
 
-from src.config import cfg
-from src.data import DatasetWrapper, train_loader, val_loader
-from src.models import ResNet18
-from src.train.callback import Callback
-from src.train.callbacks import Terminal
+from src.datasets import DatasetWrapper
+from training.callbacks.base import Callback
 
 
 @dataclass
@@ -30,10 +27,11 @@ class Trainer:
             cb.attach(self)
 
         self.total_steps = len(self.train_loader)
-        self.device = next(model.parameters()).device
 
     def fit(self, model: nn.Module):
         self.model = model
+        self.device = next(model.parameters()).device
+
         for callback in self.callbacks:
             callback.on_train_start(self)
 
@@ -43,6 +41,12 @@ class Trainer:
 
         for callback in self.callbacks:
             callback.on_train_end(self)
+
+    def validate(self, model: nn.Module):
+        pass
+
+    def test(self, model: nn.Module):
+        pass
 
     def _train_epoch(self):
         for callback in self.callbacks:
@@ -70,21 +74,3 @@ class Trainer:
 
         for callback in self.callbacks:
             callback.on_batch_end(self)
-
-
-if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = ResNet18(num_classes=10).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    criterion = getattr(torch.nn, "CrossEntropyLoss")()
-
-    trainer = Trainer(
-        optimizer=optimizer,
-        criterion=criterion,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        num_epochs=50,
-        callbacks=[Terminal()],
-    )
-
-    trainer.fit(model)
